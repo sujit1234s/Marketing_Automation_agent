@@ -18,7 +18,7 @@ PROCESSED_IDS: set[str] = set()
 
 
 def load_knowledge_base() -> str:
-    kb_path = os.path.join(os.path.dirname(__file__), "nestio_knowledge_base.txt")
+    kb_path = os.path.join(os.path.dirname(__file__), "knowledge_base.txt")
     if os.path.exists(kb_path):
         with open(kb_path, "r", encoding="utf-8") as f:
             return f.read()
