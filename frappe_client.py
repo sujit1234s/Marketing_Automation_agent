@@ -368,6 +368,8 @@ def send_whatsapp_message(to_mobile: str, reply_text: str, lead_id: str | None =
     }
 
     res = session.post(url, json=payload, timeout=20)
+    if res.status_code not in (200, 201):
+        print(f"⚠️ Manual Message API Error ({res.status_code}): {res.text}")
     return res.status_code in (200, 201)
 
 
@@ -377,29 +379,64 @@ def is_within_business_hours() -> bool:
     return 9 <= now_ist.hour < 19
 
 
+def _find_lead_reference(mobile: str) -> tuple[str | None, str | None]:
+    clean_mobile, _ = _normalize_mobile(mobile)
+    if not clean_mobile:
+        return None, None
+
+    for doctype in ("CRM Lead", "Lead"):
+        url = f"{FRAPPE_URL}/api/resource/{doctype}"
+        res = session.get(
+            url,
+            params={
+                "filters": json.dumps([["mobile_no", "like", f"%{clean_mobile}"]]),
+                "fields": '["name"]',
+                "limit_page_length": 1,
+            },
+            timeout=20,
+        )
+        if res.status_code == 200 and res.json().get("data"):
+            return doctype, res.json()["data"][0]["name"]
+    return None, None
+
+
 def send_whatsapp_template(
     to_mobile: str,
     template_name: str,
     variables: list[str],
-    is_marketing: bool = True
+    is_marketing: bool = True,
+    reference_doctype: str | None = None,
+    reference_name: str | None = None,
 ) -> bool:
-    if is_marketing and not is_within_business_hours():
-        return False
+    # 24x7 ऑटोमेशनसाठी वेळ-ब्लॉक (9 AM - 7 PM IST) काढून टाकला आहे
 
     clean_to = "".join(filter(str.isdigit, str(to_mobile)))
     url = f"{FRAPPE_URL}/api/resource/WhatsApp Message"
     frappe_template_id = template_name if template_name.endswith("-en_US") else f"{template_name}-en_US"
-    body_params = [{"type": "text", "text": str(v)} for v in variables]
-    components = [{"type": "body", "parameters": body_params}] if body_params else []
+
+    if not reference_doctype or not reference_name:
+        found_dt, found_name = _find_lead_reference(clean_to)
+        reference_doctype = reference_doctype or found_dt
+        reference_name = reference_name or found_name
+
+    # frappe_whatsapp च्या send_template() साठी dictionary format आवश्यक आहे
+    body_dict = {str(idx + 1): str(val).strip() for idx, val in enumerate(variables)}
 
     payload = {
         "type": "Outgoing",
         "to": clean_to,
         "message_type": "Template",
+        "use_template": 1,
         "template": frappe_template_id,
         "whatsapp_account": "Frappe WhatsApp",
-        "custom_template_data": json.dumps(components),
+        "body_param": json.dumps(body_dict),
     }
 
+    if reference_doctype and reference_name:
+        payload["reference_doctype"] = reference_doctype
+        payload["reference_name"] = reference_name
+
     res = session.post(url, json=payload, timeout=20)
+    if res.status_code not in (200, 201):
+        print(f"⚠️ Template API Error ({res.status_code}): {res.text}")
     return res.status_code in (200, 201)

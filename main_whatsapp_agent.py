@@ -1,8 +1,11 @@
+import json
 import os
 import time
 from gemini_client import ask_ai
 from frappe_client import (
+    FRAPPE_URL,
     get_incoming_whatsapp_messages,
+    session,
     sync_whatsapp_lead,
     send_whatsapp_message,
 )
@@ -49,6 +52,35 @@ Parent Message: "{user_message}"
     return ask_ai(prompt)
 
 
+def mark_crm_lead_do_not_contact(sender_mobile: str) -> None:
+    """Marks matching CRM Lead(s) as 'Do Not Contact' so scheduled follow-ups stop."""
+    clean_num = "".join(filter(str.isdigit, str(sender_mobile)))[-10:]
+    if not clean_num:
+        return
+    try:
+        res = session.get(
+            f"{FRAPPE_URL}/api/resource/CRM Lead",
+            params={
+                "filters": json.dumps([["mobile_no", "like", f"%{clean_num}"]]),
+                "fields": '["name","status"]',
+            },
+            timeout=20,
+        )
+        if res.status_code == 200:
+            for item in res.json().get("data", []):
+                lead_name = item.get("name")
+                if lead_name:
+                    upd = session.put(
+                        f"{FRAPPE_URL}/api/resource/CRM Lead/{lead_name}",
+                        json={"status": "Do Not Contact"},
+                        timeout=20,
+                    )
+                    if upd.status_code in (200, 201):
+                        print(f"📌 Updated CRM Lead {lead_name} status -> Do Not Contact")
+    except Exception as e:
+        print(f"⚠️ Failed to update CRM Lead status on opt-out: {e}")
+
+
 def handle_single_whatsapp_message(msg: dict, kb_context: str):
     global SYNC_TO_CRM
 
@@ -73,6 +105,7 @@ def handle_single_whatsapp_message(msg: dict, kb_context: str):
         print(f"🛑 Opt-Out Triggered -> {optout_reply}")
         if SYNC_TO_CRM:
             send_whatsapp_message(sender_mobile, optout_reply)
+            mark_crm_lead_do_not_contact(sender_mobile)
         return
 
     # Generate Multilingual RAG Reply
