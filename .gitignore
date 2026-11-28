@@ -1,6 +1,16 @@
+# Environments & secrets
 .env
-__pycache__/
-*.pyc
+.env.*
+!.env.example
 .venv/
 venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE & OS files
 .idea/
+.vscode/
+*.swp
+.DS_Store
